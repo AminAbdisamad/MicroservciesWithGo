@@ -1,31 +1,52 @@
 package main
 
 import (
-	"fmt"
-	"io/ioutil"
+	"context"
+	// standard
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"time"
+
+	// internal
+	"MicroservicesWithGo/handlers"
 )
 
 const PORT = ":2022"
 
-func home(writer http.ResponseWriter, request *http.Request) {
-	log.Println("API Running")
-	data, err := ioutil.ReadAll(request.Body)
-	if err != nil {
-		http.Error(writer, "Something went wrong", http.StatusBadRequest)
-		log.Println(err)
-		return
-	}
-	fmt.Fprintf(writer, "Hello %s", data)
-
-}
 func main() {
-	http.HandleFunc("/", home)
-	err := http.ListenAndServe(PORT, nil)
+	var logs = log.New(os.Stdout, "MicroserviceWithGo", log.LstdFlags)
+	var helloHandler = handlers.NewHello(logs)
+	var productsHandler = handlers.NewProduct(logs)
+	serveMux := http.NewServeMux()
+	serveMux.Handle("/", helloHandler)
+	serveMux.Handle("/products", productsHandler)
+
+	server := &http.Server{
+		Addr:         PORT,
+		Handler:      serveMux,
+		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 1 * time.Second,
+	}
+	go func() {
+		err := server.ListenAndServe()
+		if err != nil {
+			logs.Fatal(err)
+			return
+		}
+	}()
+
+	signalChain := make(chan os.Signal)
+	signal.Notify(signalChain, os.Interrupt)
+	signal.Notify(signalChain, os.Kill)
+	sg := <-signalChain
+	logs.Println("Terminated Successfully", sg)
+	timeContext, _ := context.WithTimeout(context.Background(), 30*time.Second)
+	err := server.Shutdown(timeContext)
 	if err != nil {
-		log.Println(err)
+		logs.Println(err)
 		return
 	}
-
 }
